@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pytest
 
 from tls_auditor import __version__
-from tls_auditor.cli import build_parser, format_cert, main
+from tls_auditor.cli import build_parser, main
 from tls_auditor.probe import CertBasics, Endpoint
 
 
@@ -39,28 +39,30 @@ def _sample_cert() -> CertBasics:
         issuer={"commonName": "Test CA"},
         san=["example.com", "www.example.com"],
         not_before="Jan  1 00:00:00 2025 GMT",
-        not_after="Jan  1 00:00:00 2026 GMT",
+        not_after="Jan  1 00:00:00 2030 GMT",
     )
 
 
-def test_format_cert_text():
-    out = format_cert(_sample_cert(), "text")
-    assert "Subject:    example.com" in out
-    assert "Issuer:     Test CA" in out
-    assert "www.example.com" in out
-
-
-def test_format_cert_json():
-    payload = json.loads(format_cert(_sample_cert(), "json"))
-    assert payload["subject"]["commonName"] == "example.com"
-    assert "www.example.com" in payload["san"]
-
-
-def test_main_uses_mocked_probe(capsys):
-    with patch("tls_auditor.cli.fetch_cert", return_value=_sample_cert()):
-        rc = main(["audit", "example.com:443"])
+def test_main_renders_text(capsys):
+    with patch("tls_auditor.cli.fetch_cert", return_value=_sample_cert()), \
+         patch("tls_auditor.cli.probe_protocols", return_value=()):
+        rc = main(["audit", "example.com:443", "--no-color", "--no-protocols"])
     assert rc == 0
-    assert "Subject:    example.com" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Subject:    example.com" in out
+    assert "Grade:" in out
+
+
+def test_main_renders_json(capsys):
+    with patch("tls_auditor.cli.fetch_cert", return_value=_sample_cert()), \
+         patch("tls_auditor.cli.probe_protocols", return_value=()):
+        rc = main(["audit", "example.com:443", "--output", "json", "--no-protocols"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["host"] == "example.com"
+    assert payload["port"] == 443
+    assert payload["certificate"]["subject"]["commonName"] == "example.com"
+    assert "grade" in payload
 
 
 def test_main_handles_connection_failure(capsys):
